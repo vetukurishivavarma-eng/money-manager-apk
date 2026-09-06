@@ -100,7 +100,8 @@ const RESTORABLE_META = new Set([
   'overall_budget', 'large_txn_threshold', 'cycle_start_day',
   'rollover', 'weekly_review', 'track_cash', 'expected_income',
 ]);
-const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null);
+const num = (v: unknown) =>
+  v === null || v === undefined || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null;
 
 export async function backupJson() {
   const uri = FileSystem.cacheDirectory + `money-tracker-backup-${dayjs().format('YYYYMMDD-HHmm')}.json`;
@@ -125,6 +126,14 @@ export async function restoreJson(): Promise<number> {
       const amount = num(t?.amount);
       const dir = t?.direction === 'credit' ? 'credit' : t?.direction === 'debit' ? 'debit' : null;
       if (ts === null || amount === null || amount < 0 || dir === null) continue; // skip garbage rows
+      // manual rows have no sms_id, so INSERT OR IGNORE can't dedupe them on re-restore
+      if (!t.sms_id) {
+        const dup = db.getFirstSync<{ n: number }>(
+          "SELECT COUNT(*) n FROM txns WHERE manual=1 AND ts=? AND amount=? AND direction=? AND IFNULL(counterparty,'')=?",
+          [ts, amount, dir, t.counterparty ? String(t.counterparty) : ''],
+        );
+        if ((dup?.n ?? 0) > 0) continue;
+      }
       const r = db.runSync(
         `INSERT OR IGNORE INTO txns
          (sms_id, ts, amount, direction, category, subcategory, counterparty, account, channel, ref_no, note, excluded, manual, needs_review, is_cash, balance, raw)
@@ -153,11 +162,13 @@ export async function restoreJson(): Promise<number> {
     }
     for (const g of data.goals ?? []) {
       const target = num(g?.target);
-      if (g?.name && target !== null && target > 0) {
-        db.runSync('INSERT INTO goals(name,target,saved,deadline,created) VALUES(?,?,?,?,?)', [
-          String(g.name).slice(0, 80), target, Math.max(0, num(g.saved) ?? 0), num(g.deadline), num(g.created) ?? Date.now(),
-        ]);
-      }
+      const name = g?.name ? String(g.name).slice(0, 80) : '';
+      if (!name || target === null || target <= 0) continue;
+      const dup = db.getFirstSync<{ n: number }>('SELECT COUNT(*) n FROM goals WHERE name=? AND target=?', [name, target]);
+      if ((dup?.n ?? 0) > 0) continue; // don't re-add a goal that's already here
+      db.runSync('INSERT INTO goals(name,target,saved,deadline,created) VALUES(?,?,?,?,?)', [
+        name, target, Math.max(0, num(g.saved) ?? 0), num(g.deadline), num(g.created) ?? Date.now(),
+      ]);
     }
     for (const m of data.meta ?? []) {
       if (RESTORABLE_META.has(m?.key)) {

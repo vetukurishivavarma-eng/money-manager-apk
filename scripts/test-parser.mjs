@@ -150,6 +150,15 @@ t('rolloverFor: no carry without 2+ periods', () => {
   assert.equal(b.rolloverFor([], null, 1000, [{ from: 0, to: 1 }]), 0);
 });
 
+t('rolloverFor: a big overspend deficit is floored at one base, not accumulated', () => {
+  const P = (m) => ({ from: new Date(2026, m, 1).getTime(), to: new Date(2026, m + 1, 1).getTime() });
+  const txns = [mkT(2026, 0, 10, 60000, 'debit', 'Shopping')]; // ₹60k vs an ₹8k budget in P(0)
+  // carry into P(1): raw would be -52000; floored to -8000
+  assert.equal(b.rolloverFor(txns, 'Shopping', 8000, [P(0), P(1)]), -8000);
+  // one empty cycle later, the floored deficit is worked off rather than lingering
+  assert.equal(b.rolloverFor(txns, 'Shopping', 8000, [P(0), P(1), P(2)]), 0);
+});
+
 // ---- formatting ----
 t('formatINR lakh grouping', () => assert.equal(formatINR(150000), '₹1,50,000'));
 t('formatINR negative', () => assert.equal(formatINR(-2499.5, { paise: true }), '-₹2,499.50'));

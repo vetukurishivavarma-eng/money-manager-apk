@@ -111,7 +111,8 @@ function rolloverFor(txns, category, base, periods) {
       ? spentByCategoryRange(txns, p.from, p.to)[category] || 0
       : totalSpentRange(txns, p.from, p.to);
     carry += base - spent;
-    if (carry > base) carry = base;
+    if (carry > base) carry = base;       // surplus can't stockpile past one cycle
+    if (carry < -base) carry = -base;     // a deficit rolls at most one cycle, not forever
   }
   return Math.round(carry);
 }

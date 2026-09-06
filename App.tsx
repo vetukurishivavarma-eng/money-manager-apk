@@ -57,11 +57,16 @@ const navTheme = {
 function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [failed, setFailed] = useState(false);
   const tryAuth = async () => {
-    const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock Money Tracker' });
-    if (r.success) onUnlock();
-    else setFailed(true);
+    setFailed(false);
+    try {
+      const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock Money Tracker' });
+      if (r.success) { onUnlock(); return; }
+    } catch {
+      // hardware error / biometrics removed while open — fall through to the retry button
+    }
+    setFailed(true);
   };
-  useEffect(() => { tryAuth(); }, []);
+  useEffect(() => { void tryAuth(); }, []);
   return (
     <View style={{ flex: 1, backgroundColor: C.brand, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
       <Ionicons name="lock-closed" size={44} color="#fff" />
@@ -82,9 +87,9 @@ export default function App() {
   const appState = useRef(AppState.currentState);
 
   useEffect(() => {
-    // block screenshots / screen recording of balances when the app lock is on
-    if (getFlag('app_lock')) ScreenCapture.preventScreenCaptureAsync().catch(() => {});
-  }, [onboarded, locked]);
+    // a finance app — keep balances out of screenshots / screen recordings / recents
+    ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!onboarded) return;

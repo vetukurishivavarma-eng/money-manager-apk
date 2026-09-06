@@ -27,8 +27,9 @@ export default function Dashboard({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = () => {
-    setSnap(computeSnapshot(m.ref).snapshot);
-    setCats(categoryStatuses(m.ref));
+    const cs = computeSnapshot(m.ref);
+    setSnap(cs.snapshot);
+    setCats(cs.categories);
     const all = allTxns();
     setRecent(all.slice(0, 6));
     setReviews(reviewCount());

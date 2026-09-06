@@ -47,7 +47,9 @@ interface Picked { category: string; subcategory: string | null; review: number 
 function pickCategory(counterparty: string | undefined, channel: string | undefined, direction: string): Picked {
   const sub = (cat: string, text: string): string | null => (subcategorize(cat, text) as string | null) ?? null;
   if (direction === 'credit') {
-    return { category: 'Income', subcategory: sub('Income', counterparty || '') || 'Refund', review: 0 };
+    // don't blanket-label credits "Refund" — that's what drives refund-matching,
+    // and most credits (P2P, interest, reimbursements) are not refunds
+    return { category: 'Income', subcategory: sub('Income', counterparty || ''), review: 0 };
   }
   const text = counterparty || '';
   // 1. user-learned rules (substring on payee)
@@ -119,27 +121,43 @@ export async function scanSms(opts: { full?: boolean } = {}): Promise<ScanResult
   return { added, newDebits };
 }
 
+const norm = (s: string | null | undefined) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 /**
- * Link a refund credit to the original debit (same amount, within 45 days) and
- * net both out of spending so a returned purchase doesn't distort the month.
+ * Link a refund credit to the original debit and net both out of spending.
+ * Conservative on purpose: only credits whose SMS text actually says
+ * refund/reversal/chargeback qualify (a friend repaying your share never does),
+ * and the original debit must plausibly be the same merchant.
  */
 function matchRefunds() {
-  const credits = db.getAllSync<{ id: number; ts: number; amount: number; counterparty: string | null }>(
-    `SELECT id, ts, amount, counterparty FROM txns
+  const credits = db.getAllSync<{ id: number; ts: number; amount: number; counterparty: string | null; raw: string | null }>(
+    `SELECT id, ts, amount, counterparty, raw FROM txns
      WHERE direction='credit' AND excluded=0 AND refund_of IS NULL
-       AND (subcategory='Refund' OR lower(raw) LIKE '%refund%' OR lower(raw) LIKE '%reversed%')`,
+       AND (lower(raw) LIKE '%refund%' OR lower(raw) LIKE '%reversed%'
+            OR lower(raw) LIKE '%reversal%' OR lower(raw) LIKE '%chargeback%')`,
   );
   for (const c of credits) {
-    const d = db.getFirstSync<{ id: number }>(
-      `SELECT id FROM txns
-       WHERE direction='debit' AND excluded=0 AND ts <= ? AND ts >= ?
-         AND ABS(amount - ?) < 1
-       ORDER BY ts DESC LIMIT 1`,
+    const cands = db.getAllSync<{ id: number; counterparty: string | null }>(
+      `SELECT id, counterparty FROM txns
+       WHERE direction='debit' AND excluded=0 AND refund_of IS NULL
+         AND ts <= ? AND ts >= ? AND ABS(amount - ?) < 1
+       ORDER BY ts DESC`,
       [c.ts, c.ts - 45 * DAY, c.amount],
     );
-    if (d) {
-      db.runSync('UPDATE txns SET excluded=1, refund_of=? WHERE id=?', [d.id, c.id]);
-      db.runSync('UPDATE txns SET excluded=1 WHERE id=?', [d.id]);
+    if (!cands.length) continue;
+    const cName = norm(c.counterparty);
+    const rawN = norm(c.raw);
+    const match = cands.find((d) => {
+      const dName = norm(d.counterparty);
+      if (!dName) return false;
+      return (
+        (cName && (dName.includes(cName.slice(0, 6)) || cName.includes(dName.slice(0, 6)))) ||
+        (dName.length >= 5 && rawN.includes(dName.slice(0, 8)))
+      );
+    }) || (cands.length === 1 ? cands[0] : null);
+    if (match) {
+      db.runSync('UPDATE txns SET excluded=1, refund_of=? WHERE id=?', [match.id, c.id]);
+      db.runSync('UPDATE txns SET excluded=1 WHERE id=?', [match.id]);
     }
   }
 }

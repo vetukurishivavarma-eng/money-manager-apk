@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
 import { C, CATEGORIES } from '../theme';
 import { Card, Muted, ProgressBar, PickerSheet } from '../components/ui';
@@ -6,7 +6,7 @@ import { useReload } from '../components/hooks';
 import {
   allTxns, getBudgets, getFlag, getMeta, getMetaNum, setBudget, setMeta,
 } from '../db';
-import { categoryStatuses, computeSnapshot, expectedIncome } from '../summary';
+import { computeSnapshot, expectedIncome } from '../summary';
 import { pushWidgetUpdate } from '../widget/update';
 // @ts-ignore
 import * as B from '../budget.js';
@@ -49,24 +49,30 @@ function BudgetRow({
 }
 
 export default function Budgets() {
-  const [, force] = useState(0);
+  const [tick, force] = useState(0);
   const reload = () => force((x) => x + 1);
   useReload(reload);
   const [pickDay, setPickDay] = useState(false);
 
-  const txns = allTxns();
-  const budgets = getBudgets();
-  const cats = categoryStatuses();
+  // one snapshot per reload — computeSnapshot() is O(categories x periods x txns)
+  const { txns, budgets, cats, snap, explicitOverall, sumCats, rollover, cycleDay, income } = useMemo(() => {
+    const cs = computeSnapshot();
+    const bg = getBudgets();
+    return {
+      txns: allTxns(),
+      budgets: bg,
+      cats: cs.categories,
+      snap: cs.snapshot,
+      explicitOverall: getMetaNum('overall_budget', 0),
+      sumCats: Object.values(bg).reduce((s, v) => s + v, 0),
+      rollover: getFlag('rollover'),
+      cycleDay: Math.min(28, Math.max(1, Math.round(getMetaNum('cycle_start_day', 1)))),
+      income: expectedIncome(),
+    };
+  }, [tick]);
+
   const statusOf = (c: string) => cats.find((x) => x.category === c);
   const now = Date.now();
-
-  const snap = computeSnapshot().snapshot;
-  const explicitOverall = getMetaNum('overall_budget', 0);
-  const sumCats = Object.values(budgets).reduce((s, v) => s + v, 0);
-  const rollover = getFlag('rollover');
-  const cycleDay = Math.min(28, Math.max(1, Math.round(getMetaNum('cycle_start_day', 1))));
-
-  const income = expectedIncome();
   const leftToAllocate = income - sumCats;
 
   const setOverall = (n: number) => { setMeta('overall_budget', String(n)); pushWidgetUpdate(); reload(); };

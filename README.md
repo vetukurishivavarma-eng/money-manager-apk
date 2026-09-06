@@ -50,7 +50,8 @@ on/off, erase-all.
 
 **Security**
 - Optional biometric app lock (fingerprint / face).
-- When the lock is on, screenshots and screen recording are blocked.
+- Screenshots and screen recording are blocked app-wide (balances stay out of the
+  recents preview too).
 - `allowBackup=false` — the database can't be pulled via `adb backup`.
 - No `SYSTEM_ALERT_WINDOW` / `RECEIVE_SMS` — the app only reads the SMS inbox on
   a schedule, it has no overlay and no incoming-SMS receiver.

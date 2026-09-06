@@ -39,9 +39,13 @@ export function computeSnapshot(ref: Date | number = new Date()): {
   period: Period;
 } {
   const p = periodFor(ref);
-  const periods = recentPeriods(ROLL_PERIODS, ref);
   const txns = allTxns();
   const budgets = getBudgets();
+
+  // Only roll over across cycles the user was actually tracking — otherwise the
+  // empty pre-install months each contribute a full base and double the budget.
+  const firstTs = txns.length ? Math.min(...txns.map((t) => t.ts)) : p.from;
+  const periods = recentPeriods(ROLL_PERIODS, ref).filter((pp) => pp.to > firstTs);
 
   const spent = B.totalSpentRange(txns, p.from, p.to) as number;
   const income = B.totalIncomeRange(txns, p.from, p.to) as number;
