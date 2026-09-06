@@ -1,6 +1,9 @@
 import * as SQLite from 'expo-sqlite';
 import type { Txn, ParsedTxn } from './types';
 
+// ponytail: DB is plain SQLite in app-private storage (Android sandbox + optional
+// biometric UI lock + allowBackup=false). Move to SQLCipher / expo-secure-store
+// key wrapping only if the threat model grows to a rooted / forensic adversary.
 export const db = SQLite.openDatabaseSync('money.db');
 
 export function initDb() {

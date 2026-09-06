@@ -48,6 +48,8 @@ function cleanParty(s) {
 
 function parseSms(body, sender = '', tsMs = Date.now()) {
   if (!body || typeof body !== 'string') return null;
+  // bound regex work on attacker-controlled input; real bank SMS are well under this
+  if (body.length > 1600) return null;
   const b = body.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
   const low = b.toLowerCase();
 

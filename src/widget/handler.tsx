@@ -5,7 +5,7 @@ import { SNAPSHOT_KEY } from '../keys';
 import { BudgetWidget, SafeWidget } from './BudgetWidget';
 import type { BudgetSnapshot } from '../types';
 
-const WIDGETS: Record<string, (p: { snapshot: BudgetSnapshot | null }) => JSX.Element> = {
+const WIDGETS: Record<string, (p: { snapshot: BudgetSnapshot | null }) => React.ReactElement> = {
   Budget: BudgetWidget,
   Safe: SafeWidget,
 };

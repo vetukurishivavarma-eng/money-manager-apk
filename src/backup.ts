@@ -44,7 +44,8 @@ export async function monthlyReportPdf() {
   const txns = allTxns()
     .filter((t) => t.ts >= period.from && t.ts < period.to && t.direction === 'debit' && !t.excluded)
     .sort((a, b) => b.amount - a.amount);
-  const esc = (s: unknown) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
+  const esc = (s: unknown) =>
+    String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]!));
 
   const catRows = categories
     .filter((c) => c.spent > 0)
@@ -83,15 +84,23 @@ export async function monthlyReportPdf() {
 
 function dump() {
   return {
-    v: 1,
+    v: 2,
     exportedAt: Date.now(),
     txns: db.getAllSync('SELECT * FROM txns'),
     budgets: db.getAllSync('SELECT * FROM budgets'),
     category_rules: db.getAllSync('SELECT * FROM category_rules'),
     ignored_accounts: db.getAllSync('SELECT * FROM ignored_accounts'),
+    goals: db.getAllSync('SELECT * FROM goals'),
     meta: db.getAllSync('SELECT * FROM meta'),
   };
 }
+
+// settings that are safe to carry across a restore (no auth / lock state)
+const RESTORABLE_META = new Set([
+  'overall_budget', 'large_txn_threshold', 'cycle_start_day',
+  'rollover', 'weekly_review', 'track_cash', 'expected_income',
+]);
+const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : null);
 
 export async function backupJson() {
   const uri = FileSystem.cacheDirectory + `money-tracker-backup-${dayjs().format('YYYYMMDD-HHmm')}.json`;
@@ -104,33 +113,55 @@ export async function restoreJson(): Promise<number> {
   const res = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
   if (res.canceled || !res.assets?.[0]) return 0;
   const text = await FileSystem.readAsStringAsync(res.assets[0].uri);
-  const data = JSON.parse(text);
+  if (text.length > 20_000_000) throw new Error('Backup file is too large');
+  let data: any;
+  try { data = JSON.parse(text); } catch { throw new Error('That file is not valid JSON'); }
   if (!data || !Array.isArray(data.txns)) throw new Error('Not a Money Tracker backup');
 
   let added = 0;
   db.withTransactionSync(() => {
     for (const t of data.txns) {
+      const ts = num(t?.ts);
+      const amount = num(t?.amount);
+      const dir = t?.direction === 'credit' ? 'credit' : t?.direction === 'debit' ? 'debit' : null;
+      if (ts === null || amount === null || amount < 0 || dir === null) continue; // skip garbage rows
       const r = db.runSync(
         `INSERT OR IGNORE INTO txns
-         (sms_id, ts, amount, direction, category, subcategory, counterparty, account, channel, ref_no, note, excluded, manual, needs_review, raw)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         (sms_id, ts, amount, direction, category, subcategory, counterparty, account, channel, ref_no, note, excluded, manual, needs_review, is_cash, balance, raw)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
-          t.sms_id ?? null, t.ts, t.amount, t.direction, t.category ?? 'Other', t.subcategory ?? null,
-          t.counterparty ?? null, t.account ?? null, t.channel ?? null, t.ref_no ?? null, t.note ?? null,
-          t.excluded ?? 0, t.manual ?? 0, t.needs_review ?? 0, t.raw ?? null,
+          t.sms_id ? String(t.sms_id) : null, ts, amount, dir, String(t.category ?? 'Other'),
+          t.subcategory ? String(t.subcategory) : null, t.counterparty ? String(t.counterparty) : null,
+          t.account ? String(t.account) : null, t.channel ? String(t.channel) : null,
+          t.ref_no ? String(t.ref_no) : null, t.note ? String(t.note).slice(0, 500) : null,
+          t.excluded ? 1 : 0, t.manual ? 1 : 0, t.needs_review ? 1 : 0, t.is_cash ? 1 : 0,
+          num(t.balance), t.raw ? String(t.raw).slice(0, 2000) : null,
         ],
       );
       added += r.changes;
     }
     for (const b of data.budgets ?? []) {
-      db.runSync('INSERT OR REPLACE INTO budgets(category,monthly) VALUES(?,?)', [b.category, b.monthly]);
+      const m = num(b?.monthly);
+      if (b?.category && m !== null && m >= 0) {
+        db.runSync('INSERT OR REPLACE INTO budgets(category,monthly) VALUES(?,?)', [String(b.category), m]);
+      }
     }
     for (const c of data.category_rules ?? []) {
-      db.runSync('INSERT OR REPLACE INTO category_rules(pattern,category) VALUES(?,?)', [c.pattern, c.category]);
+      if (c?.pattern && c?.category) {
+        db.runSync('INSERT OR REPLACE INTO category_rules(pattern,category) VALUES(?,?)', [String(c.pattern).toLowerCase().slice(0, 60), String(c.category)]);
+      }
+    }
+    for (const g of data.goals ?? []) {
+      const target = num(g?.target);
+      if (g?.name && target !== null && target > 0) {
+        db.runSync('INSERT INTO goals(name,target,saved,deadline,created) VALUES(?,?,?,?,?)', [
+          String(g.name).slice(0, 80), target, Math.max(0, num(g.saved) ?? 0), num(g.deadline), num(g.created) ?? Date.now(),
+        ]);
+      }
     }
     for (const m of data.meta ?? []) {
-      if (m.key === 'overall_budget' || m.key === 'large_txn_threshold') {
-        db.runSync('INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)', [m.key, m.value]);
+      if (RESTORABLE_META.has(m?.key)) {
+        db.runSync('INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)', [m.key, String(m.value ?? '').slice(0, 40)]);
       }
     }
   });

@@ -7,6 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as ScreenCapture from 'expo-screen-capture';
 
 import { C } from './src/theme';
 import { initDb, getMeta, getFlag } from './src/db';
@@ -79,6 +80,11 @@ export default function App() {
   const [onboarded, setOnboarded] = useState(() => getMeta('onboarded') === '1');
   const [locked, setLocked] = useState(() => getFlag('app_lock'));
   const appState = useRef(AppState.currentState);
+
+  useEffect(() => {
+    // block screenshots / screen recording of balances when the app lock is on
+    if (getFlag('app_lock')) ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+  }, [onboarded, locked]);
 
   useEffect(() => {
     if (!onboarded) return;

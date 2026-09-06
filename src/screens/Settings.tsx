@@ -155,6 +155,7 @@ export default function Settings({ navigation }: any) {
         <Button title="Export CSV" kind="ghost" icon="download-outline" onPress={() => run(exportCsv)} />
         <View style={{ height: 8 }} />
         <Button title="Backup (JSON)" kind="ghost" icon="save-outline" onPress={() => run(backupJson)} />
+        <Muted style={{ fontSize: 11, marginTop: 4 }}>The backup file is not encrypted — keep it somewhere private.</Muted>
         <View style={{ height: 8 }} />
         <Button title="Restore from backup" kind="ghost" icon="folder-open-outline" onPress={() => run(async () => { const n = await restoreJson(); Alert.alert('Restored', `${n} transactions added.`); })} />
         <View style={{ height: 8 }} />

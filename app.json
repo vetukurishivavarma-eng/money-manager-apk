@@ -24,8 +24,11 @@
       },
       "permissions": [
         "android.permission.READ_SMS",
-        "android.permission.RECEIVE_SMS",
         "android.permission.POST_NOTIFICATIONS"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECEIVE_SMS",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ],
       "edgeToEdgeEnabled": true
     },
@@ -67,7 +70,8 @@
           ]
         }
       ],
-      "expo-font"
+      "expo-font",
+      "./plugins/withHardenedManifest.js"
     ]
   }
 }
