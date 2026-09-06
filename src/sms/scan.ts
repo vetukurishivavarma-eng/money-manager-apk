@@ -5,7 +5,7 @@ import { parseSms } from './parse.js';
 // @ts-ignore
 import { categorize, subcategorize } from '../categorize.js';
 import {
-  db, getMeta, setMeta, insertParsed, getRules, getIgnoredAccounts,
+  db, getMeta, setMeta, insertParsed, getRules, getIgnoredAccounts, getFlag,
 } from '../db';
 import type { ParsedTxn } from '../types';
 
@@ -83,13 +83,18 @@ export async function scanSms(opts: { full?: boolean } = {}): Promise<ScanResult
   }
 
   const ignored = new Set(getIgnoredAccounts());
+  const trackCash = getFlag('track_cash');
   const newDebits: { amount: number; counterparty: string | null }[] = [];
   let added = 0;
 
   for (const m of msgs) {
     const p = parseSms(m.body, m.address, Number(m.date)) as ParsedTxn | null;
     if (!p) continue;
-    const { category, subcategory, review } = pickCategory(p.counterparty, p.channel, p.direction);
+
+    const isAtm = p.direction === 'debit' && p.channel === 'ATM';
+    let { category, subcategory, review } = pickCategory(p.counterparty, p.channel, p.direction);
+    if (isAtm) { category = 'Cash/ATM'; subcategory = 'ATM Withdrawal'; review = 0; }
+
     const isIgnored = p.account && ignored.has(p.account) ? 1 : 0;
     const ok = insertParsed({
       ...p,
@@ -97,18 +102,46 @@ export async function scanSms(opts: { full?: boolean } = {}): Promise<ScanResult
       category,
       subcategory: subcategory || undefined,
       needs_review: isIgnored ? 0 : review,
+      is_cash: isAtm && trackCash ? 1 : 0,
       raw: m.body,
     });
     if (ok) {
       added++;
-      if (isIgnored) db.runSync('UPDATE txns SET excluded=1 WHERE sms_id=?', [String(m._id)]);
+      // an ATM withdrawal isn't a spend when cash tracking is on — it moves money to the wallet
+      if (isIgnored || (isAtm && trackCash)) db.runSync('UPDATE txns SET excluded=1 WHERE sms_id=?', [String(m._id)]);
       else if (p.direction === 'debit') newDebits.push({ amount: p.amount, counterparty: p.counterparty ?? null });
     }
   }
 
   markInternalTransfers();
+  matchRefunds();
   setMeta('last_scan_ts', String(Date.now()));
   return { added, newDebits };
+}
+
+/**
+ * Link a refund credit to the original debit (same amount, within 45 days) and
+ * net both out of spending so a returned purchase doesn't distort the month.
+ */
+function matchRefunds() {
+  const credits = db.getAllSync<{ id: number; ts: number; amount: number; counterparty: string | null }>(
+    `SELECT id, ts, amount, counterparty FROM txns
+     WHERE direction='credit' AND excluded=0 AND refund_of IS NULL
+       AND (subcategory='Refund' OR lower(raw) LIKE '%refund%' OR lower(raw) LIKE '%reversed%')`,
+  );
+  for (const c of credits) {
+    const d = db.getFirstSync<{ id: number }>(
+      `SELECT id FROM txns
+       WHERE direction='debit' AND excluded=0 AND ts <= ? AND ts >= ?
+         AND ABS(amount - ?) < 1
+       ORDER BY ts DESC LIMIT 1`,
+      [c.ts, c.ts - 45 * DAY, c.amount],
+    );
+    if (d) {
+      db.runSync('UPDATE txns SET excluded=1, refund_of=? WHERE id=?', [d.id, c.id]);
+      db.runSync('UPDATE txns SET excluded=1 WHERE id=?', [d.id]);
+    }
+  }
 }
 
 /**

@@ -13,9 +13,12 @@ export interface Txn {
   channel: string | null;
   ref_no: string | null;
   note: string | null;
-  excluded: number; // 0 | 1
-  manual: number; // 0 | 1
-  needs_review: number; // 0 | 1
+  excluded: number;
+  manual: number;
+  needs_review: number;
+  is_cash: number;
+  balance: number | null;
+  refund_of: number | null;
   raw: string | null;
 }
 
@@ -31,13 +34,18 @@ export interface ParsedTxn {
 }
 
 export interface BudgetSnapshot {
-  month: string; // "September 2026"
+  month: string; // period label, e.g. "September 2026" or "26 Aug – 25 Sep"
   spent: number;
-  budget: number;
+  budget: number; // effective (incl. rollover)
+  baseBudget: number;
+  rollover: number;
   income: number;
+  todaySpent: number;
   state: 'none' | 'ok' | 'warn' | 'over';
-  safePerDay: number;
+  safePerDay: number; // for the rest of the period
+  safeToday: number; // safePerDay minus what's already gone today
   projected: number;
+  daysLeft: number;
   updatedAt: number;
   topCategory: { name: string; spent: number } | null;
 }

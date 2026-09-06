@@ -66,11 +66,25 @@ export default function Insights() {
     return Object.entries(o).sort((a, b) => b[1] - a[1]);
   };
 
+  const prevMk = dayjs(m.ref).subtract(1, 'month').format('YYYY-MM');
   const merchants = useMemo(() => {
-    const o: Record<string, number> = {};
-    for (const t of monthTxns) if (t.counterparty) o[t.counterparty] = (o[t.counterparty] || 0) + t.amount;
-    return Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  }, [monthTxns]);
+    const cur: Record<string, number> = {};
+    const prev: Record<string, number> = {};
+    for (const t of rows) {
+      if (!spend(t) || !t.counterparty) continue;
+      const k = dayjs(t.ts).format('YYYY-MM');
+      if (k === mk) cur[t.counterparty] = (cur[t.counterparty] || 0) + t.amount;
+      else if (k === prevMk) prev[t.counterparty] = (prev[t.counterparty] || 0) + t.amount;
+    }
+    return Object.entries(cur)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name, v]) => {
+        const p = prev[name] || 0;
+        const delta = p > 0 ? Math.round(((v - p) / p) * 100) : null;
+        return { name, v, delta };
+      });
+  }, [rows, mk, prevMk]);
 
   const subs = useMemo(() => detectRecurring(rows), [rows]);
   const subsMonthly = subs.reduce((s: number, r: any) => s + r.monthlyEstimate, 0);
@@ -153,10 +167,17 @@ export default function Insights() {
 
       <Card>
         <Text style={{ fontWeight: '800', color: C.ink, marginBottom: 6 }}>Top merchants</Text>
-        {merchants.map(([name, v]) => (
-          <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 }}>
+        {merchants.map(({ name, v, delta }) => (
+          <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
             <Muted>{name}</Muted>
-            <Text style={{ color: C.ink, fontWeight: '700' }}>{formatINR(v)}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {delta !== null && Math.abs(delta) >= 10 && (
+                <Text style={{ fontSize: 11, fontWeight: '700', color: delta > 0 ? C.over : C.ok }}>
+                  {delta > 0 ? '▲' : '▼'}{Math.abs(delta)}%
+                </Text>
+              )}
+              <Text style={{ color: C.ink, fontWeight: '700' }}>{formatINR(v)}</Text>
+            </View>
           </View>
         ))}
         {merchants.length === 0 && <Muted>—</Muted>}

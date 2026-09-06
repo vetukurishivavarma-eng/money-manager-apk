@@ -7,7 +7,7 @@ import { Amount, Card, Muted, ProgressBar } from '../components/ui';
 import { MonthNav } from '../components/MonthNav';
 import { useMonthCursor, useReload } from '../components/hooks';
 import { computeSnapshot, categoryStatuses } from '../summary';
-import { allTxns, reviewCount } from '../db';
+import { allTxns, reviewCount, cashWallet, latestBalances, getFlag } from '../db';
 // @ts-ignore
 import { detectRecurring } from '../recurring.js';
 // @ts-ignore
@@ -22,6 +22,8 @@ export default function Dashboard({ navigation }: any) {
   const [recent, setRecent] = useState<Txn[]>([]);
   const [reviews, setReviews] = useState(0);
   const [subs, setSubs] = useState<any[]>([]);
+  const [cash, setCash] = useState(0);
+  const [netWorth, setNetWorth] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = () => {
@@ -31,7 +33,10 @@ export default function Dashboard({ navigation }: any) {
     setRecent(all.slice(0, 6));
     setReviews(reviewCount());
     const now = Date.now();
-    setSubs(detectRecurring(all).filter((r: any) => r.nextTs > now - 3 * 864e5).slice(0, 4));
+    setSubs(detectRecurring(all).filter((r: any) => r.nextTs > now - 3 * 864e5).slice(0, 3));
+    setCash(getFlag('track_cash') ? cashWallet() : 0);
+    const bals = latestBalances();
+    setNetWorth(bals.length ? bals.reduce((s, b) => s + b.balance, 0) : null);
   };
   useReload(load);
   React.useEffect(load, [m.ref]);
@@ -46,6 +51,7 @@ export default function Dashboard({ navigation }: any) {
   const net = snap.income - snap.spent;
   const topCats = cats.filter((c) => c.spent > 0).slice(0, 6);
   const maxSpent = topCats[0]?.spent || 1;
+  const showSafe = m.atCurrent && snap.budget > 0 && snap.state !== 'over';
 
   return (
     <ScrollView
@@ -55,17 +61,35 @@ export default function Dashboard({ navigation }: any) {
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <Text style={{ fontSize: 22, fontWeight: '900', color: C.brand }}>Money Tracker</Text>
-        <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
-          <Ionicons name="settings-outline" size={22} color={C.sub} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 16 }}>
+          <Pressable onPress={() => navigation.navigate('Upcoming')} hitSlop={10}>
+            <Ionicons name="calendar-outline" size={22} color={C.sub} />
+          </Pressable>
+          <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
+            <Ionicons name="settings-outline" size={22} color={C.sub} />
+          </Pressable>
+        </View>
       </View>
 
       <MonthNav label={m.label} atCurrent={m.atCurrent} onPrev={m.prev} onNext={m.next} />
 
+      {/* SAFE TO SPEND TODAY — the number that matters */}
+      {showSafe && (
+        <Card style={{ backgroundColor: C.brand }}>
+          <Text style={{ color: '#CDE7DC', fontSize: 13 }}>Safe to spend today</Text>
+          <Text style={{ color: '#fff', fontSize: 36, fontWeight: '900', marginVertical: 2 }}>
+            {formatINR(snap.safeToday)}
+          </Text>
+          <Text style={{ color: '#CDE7DC', fontSize: 12 }}>
+            {formatINR(snap.todaySpent)} spent today · {formatINR(snap.safePerDay)}/day for {snap.daysLeft} days left
+          </Text>
+        </Card>
+      )}
+
       {/* summary */}
       <Card>
-        <Muted>Spent this month</Muted>
-        <Text style={{ fontSize: 34, fontWeight: '900', color: C.ink, marginVertical: 2 }}>{formatINR(snap.spent)}</Text>
+        <Muted>Spent this {snap.month.includes('–') ? 'cycle' : 'month'}</Muted>
+        <Text style={{ fontSize: 32, fontWeight: '900', color: C.ink, marginVertical: 2 }}>{formatINR(snap.spent)}</Text>
         <View style={{ flexDirection: 'row', gap: 20, marginTop: 4 }}>
           <View>
             <Muted>Income</Muted>
@@ -77,32 +101,52 @@ export default function Dashboard({ navigation }: any) {
               {net >= 0 ? '+' : '-'}{formatINR(Math.abs(net))}
             </Text>
           </View>
+          {netWorth !== null && (
+            <View>
+              <Muted>Bank balance</Muted>
+              <Text style={{ color: C.ink, fontWeight: '700' }}>{formatINR(netWorth)}</Text>
+            </View>
+          )}
         </View>
 
-        {snap.budget > 0 && (
+        {snap.budget > 0 ? (
           <View style={{ marginTop: 14 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-              <Muted>Budget {formatINR(snap.budget)}</Muted>
+              <Muted>
+                Budget {formatINR(snap.budget)}
+                {snap.rollover ? ` (${snap.rollover > 0 ? '+' : ''}${formatINR(snap.rollover)} rolled over)` : ''}
+              </Muted>
               <Text style={{ fontSize: 12, fontWeight: '700', color: stateColor(snap.state) }}>
                 {snap.state === 'over'
                   ? `${formatINR(snap.spent - snap.budget)} over`
                   : snap.state === 'warn'
-                    ? `On track for ${formatINR(snap.projected)}`
+                    ? `Heading for ${formatINR(snap.projected)}`
                     : `${formatINR(snap.budget - snap.spent)} left`}
               </Text>
             </View>
             <ProgressBar pct={snap.spent / snap.budget} state={snap.state} />
-            {m.atCurrent && snap.state !== 'over' && (
-              <Muted style={{ marginTop: 6 }}>Safe to spend {formatINR(snap.safePerDay)}/day for the rest of the month</Muted>
-            )}
           </View>
-        )}
-        {snap.budget === 0 && (
+        ) : (
           <Pressable onPress={() => navigation.navigate('Budget')} style={{ marginTop: 12 }}>
             <Text style={{ color: C.brand, fontWeight: '700' }}>+ Set a monthly budget</Text>
           </Pressable>
         )}
       </Card>
+
+      {getFlag('track_cash') && (
+        <Pressable onPress={() => navigation.navigate('AddTxn', { cash: true })}>
+          <Card>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Ionicons name="cash-outline" size={20} color={C.brand} />
+              <View style={{ flex: 1 }}>
+                <Muted>Cash in wallet (approx.)</Muted>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: cash < 0 ? C.over : C.ink }}>{formatINR(cash)}</Text>
+              </View>
+              <Text style={{ color: C.brand, fontWeight: '700' }}>+ Spent cash</Text>
+            </View>
+          </Card>
+        </Pressable>
+      )}
 
       {reviews > 0 && (
         <Pressable onPress={() => navigation.navigate('Spending', { filter: 'review' })}>
@@ -118,21 +162,14 @@ export default function Dashboard({ navigation }: any) {
         </Pressable>
       )}
 
-      {/* where the money goes */}
       <Card>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>Where it's going</Text>
-          <Pressable onPress={() => navigation.navigate('Insights')}>
-            <Muted>Insights ›</Muted>
-          </Pressable>
+          <Pressable onPress={() => navigation.navigate('Insights')}><Muted>Insights ›</Muted></Pressable>
         </View>
         {topCats.length === 0 && <Muted style={{ marginTop: 10 }}>No spending recorded yet.</Muted>}
         {topCats.map((c) => (
-          <Pressable
-            key={c.category}
-            onPress={() => navigation.navigate('Spending', { category: c.category })}
-            style={{ marginTop: 12 }}
-          >
+          <Pressable key={c.category} onPress={() => navigation.navigate('Spending', { category: c.category })} style={{ marginTop: 12 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Ionicons name={(CATEGORY_ICON[c.category] || 'ellipse') as any} size={14} color={C.sub} />
@@ -147,30 +184,34 @@ export default function Dashboard({ navigation }: any) {
             />
             {c.budget > 0 && (
               <Muted style={{ fontSize: 11, marginTop: 3 }}>
-                of {formatINR(c.budget)} budget{c.state === 'over' ? ' — over' : c.state === 'warn' ? ' — spending fast' : ''}
+                of {formatINR(c.budget)}{c.rollover ? ` (incl. ${formatINR(c.rollover)} rolled)` : ''}
+                {c.state === 'over' ? ' — over' : c.state === 'warn' ? ' — fast' : ''}
               </Muted>
             )}
           </Pressable>
         ))}
       </Card>
 
-      {/* upcoming subscriptions */}
       {subs.length > 0 && (
-        <Card>
-          <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink, marginBottom: 4 }}>Upcoming recurring payments</Text>
-          {subs.map((r, i) => (
-            <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-              <View>
-                <Text style={{ color: C.ink, fontWeight: '600' }}>{r.payee}</Text>
-                <Muted style={{ fontSize: 11 }}>~{dayjs(r.nextTs).format('D MMM')} · {r.category}</Muted>
-              </View>
-              <Text style={{ color: C.ink, fontWeight: '700' }}>{formatINR(r.amount)}</Text>
+        <Pressable onPress={() => navigation.navigate('Upcoming')}>
+          <Card>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>Coming up</Text>
+              <Muted>All ›</Muted>
             </View>
-          ))}
-        </Card>
+            {subs.map((r, i) => (
+              <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                <View>
+                  <Text style={{ color: C.ink, fontWeight: '600' }}>{r.payee}</Text>
+                  <Muted style={{ fontSize: 11 }}>~{dayjs(r.nextTs).format('D MMM')} · {r.category}</Muted>
+                </View>
+                <Text style={{ color: C.ink, fontWeight: '700' }}>{formatINR(r.amount)}</Text>
+              </View>
+            ))}
+          </Card>
+        </Pressable>
       )}
 
-      {/* recent */}
       <Card>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
           <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>Recent</Text>

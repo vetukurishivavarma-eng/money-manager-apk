@@ -112,6 +112,44 @@ t('budgetStatus: safe-per-day', () => {
   assert.equal(Math.round(s.safePerDay), 300); // 6000 left / 20 days
 });
 
+// ---- range sums + rollover ----
+const mkT = (y, m, d, amt, dir = 'debit', cat = 'Food & Dining') => ({
+  ts: new Date(y, m, d).getTime(), amount: amt, direction: dir, category: cat, excluded: 0,
+});
+
+t('totalSpentRange respects [from,to)', () => {
+  const txns = [mkT(2026, 5, 1, 100), mkT(2026, 5, 20, 200), mkT(2026, 6, 2, 999)];
+  const from = new Date(2026, 5, 1).getTime();
+  const to = new Date(2026, 6, 1).getTime();
+  assert.equal(b.totalSpentRange(txns, from, to), 300);
+});
+
+t('spentByCategoryRange buckets by category', () => {
+  const txns = [mkT(2026, 5, 3, 100, 'debit', 'Groceries'), mkT(2026, 5, 4, 50, 'debit', 'Groceries'), mkT(2026, 5, 5, 30, 'debit', 'Transport')];
+  const o = b.spentByCategoryRange(txns, new Date(2026, 5, 1).getTime(), new Date(2026, 6, 1).getTime());
+  assert.equal(o.Groceries, 150);
+  assert.equal(o.Transport, 30);
+});
+
+t('rolloverFor: unspent budget carries forward, capped at base', () => {
+  const P = (m) => ({ from: new Date(2026, m, 1).getTime(), to: new Date(2026, m + 1, 1).getTime() });
+  const periods = [P(3), P(4), P(5)]; // carry into P(5)
+  // base 1000/mo. Apr spent 600 (+400), May spent 1200 (-200) => carry 200, capped at 1000
+  const txns = [mkT(2026, 3, 10, 600), mkT(2026, 4, 10, 1200)];
+  assert.equal(b.rolloverFor(txns, null, 1000, periods), 200);
+});
+
+t('rolloverFor: surplus capped at one base', () => {
+  const P = (m) => ({ from: new Date(2026, m, 1).getTime(), to: new Date(2026, m + 1, 1).getTime() });
+  const periods = [P(3), P(4), P(5)];
+  const txns = []; // spent nothing => +1000 +1000 = 2000, capped to 1000
+  assert.equal(b.rolloverFor(txns, null, 1000, periods), 1000);
+});
+
+t('rolloverFor: no carry without 2+ periods', () => {
+  assert.equal(b.rolloverFor([], null, 1000, [{ from: 0, to: 1 }]), 0);
+});
+
 // ---- formatting ----
 t('formatINR lakh grouping', () => assert.equal(formatINR(150000), '₹1,50,000'));
 t('formatINR negative', () => assert.equal(formatINR(-2499.5, { paise: true }), '-₹2,499.50'));

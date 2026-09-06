@@ -48,10 +48,22 @@
               "description": "This month's spending vs budget",
               "previewImage": "./assets/icon.png",
               "updatePeriodMillis": 1800000
+            },
+            {
+              "name": "Safe",
+              "label": "Money Tracker — safe to spend",
+              "minWidth": "110dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 2,
+              "description": "How much you can spend today",
+              "previewImage": "./assets/icon.png",
+              "updatePeriodMillis": 1800000
             }
           ]
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }

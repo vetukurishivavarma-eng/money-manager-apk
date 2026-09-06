@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { C, CATEGORIES, TAXONOMY } from '../theme';
 import { Button, Card, Field, Muted, PickerSheet } from '../components/ui';
-import { insertManual } from '../db';
+import { getFlag, insertManual } from '../db';
 import { pushWidgetUpdate } from '../widget/update';
 
-export default function AddTxn({ navigation }: any) {
+export default function AddTxn({ navigation, route }: any) {
+  const cashMode = !!route?.params?.cash;
   const [amount, setAmount] = useState('');
   const [direction, setDirection] = useState<'debit' | 'credit'>('debit');
   const [category, setCategory] = useState('Cash/ATM');
   const [subcategory, setSub] = useState<string | null>('Cash Spend');
   const [payee, setPayee] = useState('');
   const [note, setNote] = useState('');
+  const [isCash, setIsCash] = useState(cashMode || getFlag('track_cash'));
   const [pick, setPick] = useState<null | 'cat' | 'sub'>(null);
 
   const amt = parseFloat(amount.replace(/,/g, ''));
@@ -20,7 +22,11 @@ export default function AddTxn({ navigation }: any) {
 
   const submit = () => {
     if (!valid) return;
-    insertManual({ amount: amt, direction, category, subcategory, counterparty: payee || null, note: note || null });
+    insertManual({
+      amount: amt, direction, category, subcategory,
+      counterparty: payee || null, note: note || null,
+      is_cash: direction === 'debit' && isCash ? 1 : 0,
+    });
     pushWidgetUpdate();
     navigation.goBack();
   };
@@ -58,6 +64,13 @@ export default function AddTxn({ navigation }: any) {
         </Pressable>
 
         <Field label="Note" value={note} onChangeText={setNote} placeholder="optional" />
+
+        {direction === 'debit' && getFlag('track_cash') && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
+            <Muted style={{ flex: 1 }}>Paid in cash (deduct from cash wallet)</Muted>
+            <Switch value={isCash} onValueChange={setIsCash} trackColor={{ true: C.brand }} />
+          </View>
+        )}
       </Card>
 
       <Button title="Add transaction" icon="checkmark" onPress={submit} />

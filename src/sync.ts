@@ -1,5 +1,6 @@
 import { scanSms } from './sms/scan';
 import { runBudgetAlerts, alertLargeTxns } from './notify';
+import { maybeWeeklyReview } from './reviews';
 import { pushWidgetUpdate } from './widget/update';
 import { setMeta } from './db';
 
@@ -13,6 +14,7 @@ export async function sync(opts: { full?: boolean } = {}): Promise<number> {
     const { added, newDebits } = await scanSms(opts);
     if (newDebits.length) await alertLargeTxns(newDebits);
     await runBudgetAlerts();
+    await maybeWeeklyReview();
     await pushWidgetUpdate();
     setMeta('last_sync_ts', String(Date.now()));
     return added;
